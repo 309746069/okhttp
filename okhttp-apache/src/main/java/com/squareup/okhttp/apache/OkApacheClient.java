@@ -49,7 +49,7 @@ public final class OkApacheClient implements HttpClient {
     String contentType = null;
     for (Header header : request.getAllHeaders()) {
       String name = header.getName();
-      if ("Content-Type".equals(name)) {
+      if ("Content-Type".equalsIgnoreCase(name)) {
         contentType = header.getValue();
       } else {
         builder.header(name, header.getValue());
@@ -67,6 +67,8 @@ public final class OkApacheClient implements HttpClient {
         if (encoding != null) {
           builder.header(encoding.getName(), encoding.getValue());
         }
+      } else {
+        body = RequestBody.create(null, new byte[0]);
       }
     }
     builder.method(method, body);

@@ -17,10 +17,10 @@ package com.squareup.okhttp;
 
 import com.squareup.okhttp.internal.NamedRunnable;
 import com.squareup.okhttp.internal.http.HttpEngine;
+import com.squareup.okhttp.internal.http.RequestException;
+import com.squareup.okhttp.internal.http.RouteException;
 import java.io.IOException;
-import java.net.MalformedURLException;
 import java.net.ProtocolException;
-import java.net.URL;
 import java.util.logging.Level;
 
 import static com.squareup.okhttp.internal.Internal.logger;
@@ -137,7 +137,7 @@ public class Call {
     }
 
     String host() {
-      return originalRequest.url().getHost();
+      return originalRequest.httpUrl().host();
     }
 
     Request request() {
@@ -186,12 +186,8 @@ public class Call {
    */
   private String toLoggableString() {
     String string = canceled ? "canceled call" : "call";
-    try {
-      String redactedUrl = new URL(originalRequest.url(), "/...").toString();
-      return string + " to " + redactedUrl;
-    } catch (MalformedURLException e) {
-      return string;
-    }
+    HttpUrl redactedUrl = originalRequest.httpUrl().resolve("/...");
+    return string + " to " + redactedUrl;
   }
 
   private Response getResponseWithInterceptorChain(boolean forWebSocket) throws IOException {
@@ -264,13 +260,26 @@ public class Call {
     while (true) {
       if (canceled) {
         engine.releaseConnection();
-        return null;
+        throw new IOException("Canceled");
       }
 
       try {
         engine.sendRequest();
         engine.readResponse();
+      } catch (RequestException e) {
+        // The attempt to interpret the request failed. Give up.
+        throw e.getCause();
+      } catch (RouteException e) {
+        // The attempt to connect via a route failed. The request will not have been sent.
+        HttpEngine retryEngine = engine.recover(e);
+        if (retryEngine != null) {
+          engine = retryEngine;
+          continue;
+        }
+        // Give up; recovery is not possible.
+        throw e.getLastConnectException();
       } catch (IOException e) {
+        // An attempt to communicate with a server failed. The request may have been sent.
         HttpEngine retryEngine = engine.recover(e, null);
         if (retryEngine != null) {
           engine = retryEngine;
@@ -295,7 +304,7 @@ public class Call {
         throw new ProtocolException("Too many follow-up requests: " + followUpCount);
       }
 
-      if (!engine.sameConnection(followUp.url())) {
+      if (!engine.sameConnection(followUp.httpUrl())) {
         engine.releaseConnection();
       }
 

@@ -32,6 +32,7 @@ import java.net.URLConnection;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import javax.net.SocketFactory;
 import org.junit.After;
 import org.junit.Test;
@@ -56,13 +57,48 @@ public final class OkHttpClientTest {
     Authenticator.setDefault(DEFAULT_AUTHENTICATOR);
   }
 
+  @Test public void timeoutDefaults() {
+    OkHttpClient client = new OkHttpClient();
+    assertEquals(10_000, client.getConnectTimeout());
+    assertEquals(10_000, client.getReadTimeout());
+    assertEquals(10_000, client.getWriteTimeout());
+  }
+
+  @Test public void timeoutValidRange() {
+    OkHttpClient client = new OkHttpClient();
+    try {
+      client.setConnectTimeout(1, TimeUnit.NANOSECONDS);
+    } catch (IllegalArgumentException ignored) {
+    }
+    try {
+      client.setWriteTimeout(1, TimeUnit.NANOSECONDS);
+    } catch (IllegalArgumentException ignored) {
+    }
+    try {
+      client.setReadTimeout(1, TimeUnit.NANOSECONDS);
+    } catch (IllegalArgumentException ignored) {
+    }
+    try {
+      client.setConnectTimeout(365, TimeUnit.DAYS);
+    } catch (IllegalArgumentException ignored) {
+    }
+    try {
+      client.setWriteTimeout(365, TimeUnit.DAYS);
+    } catch (IllegalArgumentException ignored) {
+    }
+    try {
+      client.setReadTimeout(365, TimeUnit.DAYS);
+    } catch (IllegalArgumentException ignored) {
+    }
+  }
+
   /** Confirm that {@code copyWithDefaults} gets expected constant values. */
   @Test public void copyWithDefaultsWhenDefaultIsAConstant() throws Exception {
     OkHttpClient client = new OkHttpClient().copyWithDefaults();
     assertNull(client.internalCache());
-    assertEquals(0, client.getConnectTimeout());
-    assertEquals(0, client.getReadTimeout());
-    assertEquals(0, client.getWriteTimeout());
+    assertEquals(10_000, client.getConnectTimeout());
+    assertEquals(10_000, client.getReadTimeout());
+    assertEquals(10_000, client.getWriteTimeout());
     assertTrue(client.getFollowSslRedirects());
     assertNull(client.getProxy());
     assertEquals(Arrays.asList(Protocol.HTTP_2, Protocol.SPDY_3, Protocol.HTTP_1_1),
@@ -117,6 +153,15 @@ public final class OkHttpClientTest {
     assertNull(client.internalCache());
   }
 
+  @Test public void clonedInterceptorsListsAreIndependent() throws Exception {
+    OkHttpClient original = new OkHttpClient();
+    OkHttpClient clone = original.clone();
+    clone.interceptors().add(null);
+    clone.networkInterceptors().add(null);
+    assertEquals(0, original.interceptors().size());
+    assertEquals(0, original.networkInterceptors().size());
+  }
+
   /**
    * When copying the client, stateful things like the connection pool are
    * shared across all clients.
@@ -137,49 +182,6 @@ public final class OkHttpClientTest {
     assertSame(a.getDispatcher(), b.getDispatcher());
     assertSame(a.getConnectionPool(), b.getConnectionPool());
     assertSame(a.getSslSocketFactory(), b.getSslSocketFactory());
-  }
-
-  /** We don't want to run user code inside of HttpEngine, etc. */
-  @Test public void copyWithDefaultsDoesNotReturnSubclass() throws Exception {
-    OkHttpClient subclass = new OkHttpClient() {};
-    OkHttpClient copy = subclass.copyWithDefaults();
-    assertEquals(OkHttpClient.class, copy.getClass());
-  }
-
-  @Test public void cloneReturnsSubclass() throws Exception {
-    OkHttpClient subclass = new OkHttpClient() {};
-    OkHttpClient clone = subclass.clone();
-    assertEquals(subclass.getClass(), clone.getClass());
-  }
-
-  /** Exercise a synchronous mocking case. */
-  @Test public void mock() throws Exception {
-    final Request request = new Request.Builder()
-        .url("http://example.com/")
-        .build();
-    final Response response = new Response.Builder()
-        .protocol(Protocol.HTTP_1_1)
-        .request(request)
-        .code(200)
-        .message("Alright")
-        .build();
-
-    OkHttpClient mockClient = new OkHttpClient() {
-      @Override public Call newCall(Request request) {
-        return new Call(this, request) {
-          @Override public Response execute() throws IOException {
-            return response;
-          }
-          @Override public void enqueue(Callback responseCallback) {
-          }
-          @Override public void cancel() {
-          }
-        };
-      }
-    };
-
-    Response actualResponse = mockClient.newCall(request).execute();
-    assertSame(response, actualResponse);
   }
 
   @Test public void setProtocolsRejectsHttp10() throws Exception {

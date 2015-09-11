@@ -16,16 +16,14 @@
 
 package com.squareup.okhttp.internal;
 
+import com.squareup.okhttp.HttpUrl;
 import java.io.Closeable;
-import java.io.File;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Array;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.URI;
-import java.net.URL;
 import java.nio.charset.Charset;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -50,24 +48,6 @@ public final class Util {
   public static final Charset UTF_8 = Charset.forName("UTF-8");
 
   private Util() {
-  }
-
-  public static int getEffectivePort(URI uri) {
-    return getEffectivePort(uri.getScheme(), uri.getPort());
-  }
-
-  public static int getEffectivePort(URL url) {
-    return getEffectivePort(url.getProtocol(), url.getPort());
-  }
-
-  private static int getEffectivePort(String scheme, int specifiedPort) {
-    return specifiedPort != -1 ? specifiedPort : getDefaultPort(scheme);
-  }
-
-  public static int getDefaultPort(String protocol) {
-    if ("http".equals(protocol)) return 80;
-    if ("https".equals(protocol)) return 443;
-    return -1;
   }
 
   public static void checkOffsetAndCount(long arrayLength, long offset, long count) {
@@ -104,6 +84,8 @@ public final class Util {
     if (socket != null) {
       try {
         socket.close();
+      } catch (AssertionError e) {
+        if (!isAndroidGetsocknameError(e)) throw e;
       } catch (RuntimeException rethrown) {
         throw rethrown;
       } catch (Exception ignored) {
@@ -147,25 +129,6 @@ public final class Util {
     if (thrown instanceof RuntimeException) throw (RuntimeException) thrown;
     if (thrown instanceof Error) throw (Error) thrown;
     throw new AssertionError(thrown);
-  }
-
-  /**
-   * Deletes the contents of {@code dir}. Throws an IOException if any file
-   * could not be deleted, or if {@code dir} is not a readable directory.
-   */
-  public static void deleteContents(File dir) throws IOException {
-    File[] files = dir.listFiles();
-    if (files == null) {
-      throw new IOException("not a readable directory: " + dir);
-    }
-    for (File file : files) {
-      if (file.isDirectory()) {
-        deleteContents(file);
-      }
-      if (!file.delete()) {
-        throw new IOException("failed to delete file: " + file);
-      }
-    }
   }
 
   /**
@@ -291,5 +254,38 @@ public final class Util {
       }
     }
     return result;
+  }
+
+  public static String hostHeader(HttpUrl url) {
+    // TODO: square braces for IPv6 ?
+    return url.port() != HttpUrl.defaultPort(url.scheme())
+        ? url.host() + ":" + url.port()
+        : url.host();
+  }
+
+  /** Returns {@code s} with control characters and non-ASCII characters replaced with '?'. */
+  public static String toHumanReadableAscii(String s) {
+    for (int i = 0, length = s.length(), c; i < length; i += Character.charCount(c)) {
+      c = s.codePointAt(i);
+      if (c > '\u001f' && c < '\u007f') continue;
+
+      Buffer buffer = new Buffer();
+      buffer.writeUtf8(s, 0, i);
+      for (int j = i; j < length; j += Character.charCount(c)) {
+        c = s.codePointAt(j);
+        buffer.writeUtf8CodePoint(c > '\u001f' && c < '\u007f' ? c : '?');
+      }
+      return buffer.readUtf8();
+    }
+    return s;
+  }
+
+  /**
+   * Returns true if {@code e} is due to a firmware bug fixed after Android 4.2.2.
+   * https://code.google.com/p/android/issues/detail?id=54072
+   */
+  public static boolean isAndroidGetsocknameError(AssertionError e) {
+    return e.getCause() != null && e.getMessage() != null
+        && e.getMessage().contains("getsockname failed");
   }
 }
